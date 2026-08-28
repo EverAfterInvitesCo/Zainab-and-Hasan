@@ -28,7 +28,7 @@ export const VenueSection: React.FC = () => {
           <div className="lg:col-span-6 w-full flex justify-center items-center">
             <div className="relative w-full max-w-lg lg:max-w-none flex justify-center">
               <img
-                src="/media/venue.png"
+                src="media/venue.png"
                 alt="Mövenpick Hotel Dubai Venue"
                 className="w-full max-h-[440px] object-contain mix-blend-multiply hover:scale-[1.02] transition-transform duration-700 ease-out"
                 loading="lazy"
@@ -93,5 +93,3 @@ export const VenueSection: React.FC = () => {
     </section>
   );
 };
-
-
