@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Image as ImageIcon, Send, CheckCircle2, MessageSquare, Upload, X } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { GuestbookRecord } from '../types';
+import { supabase } from '../supabaseClient';
 
 export const GuestbookSection: React.FC = () => {
   const { t, language } = useLanguage();
@@ -12,6 +13,7 @@ export const GuestbookSection: React.FC = () => {
   // Form State
   const [name, setName] = useState<string>('');
   const [message, setMessage] = useState<string>('');
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [submittedNotice, setSubmittedNotice] = useState<boolean>(false);
@@ -20,10 +22,24 @@ export const GuestbookSection: React.FC = () => {
 
   const fetchApprovedEntries = async () => {
     try {
-      const res = await fetch('/api/guestbook');
-      if (res.ok) {
-        const data = await res.json();
-        setEntries(data);
+      const { data, error } = await supabase
+        .from('guestbook')
+        .select('*')
+        .eq('status', 'approved')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      if (data) {
+        const formattedEntries: GuestbookRecord[] = data.map((item) => ({
+          id: item.id.toString(),
+          name: item.name,
+          message: item.message,
+          photoUrl: item.photo_url,
+          createdAt: item.created_at,
+          status: item.status, // Includes the status property to match GuestbookRecord type
+        }));
+        setEntries(formattedEntries);
       }
     } catch (err) {
       console.error('Error fetching guestbook:', err);
@@ -36,15 +52,13 @@ export const GuestbookSection: React.FC = () => {
     fetchApprovedEntries();
   }, []);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  const handleFileSelection = (file: File) => {
     if (file.size > 8 * 1024 * 1024) {
       setErrorMessage(language === 'ar' ? 'حجم الصورة كبير جداً (الحد الأقصى ٨ ميغابايت)' : 'Image is too large (max 8MB)');
       return;
     }
 
+    setPhotoFile(file);
     const reader = new FileReader();
     reader.onload = (event) => {
       setPhotoPreview(event.target?.result as string);
@@ -53,22 +67,15 @@ export const GuestbookSection: React.FC = () => {
     reader.readAsDataURL(file);
   };
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) handleFileSelection(file);
+  };
+
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     const file = e.dataTransfer.files?.[0];
-    if (!file) return;
-
-    if (file.size > 8 * 1024 * 1024) {
-      setErrorMessage(language === 'ar' ? 'حجم الصورة كبير جداً' : 'Image is too large');
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      setPhotoPreview(event.target?.result as string);
-      setErrorMessage('');
-    };
-    reader.readAsDataURL(file);
+    if (file) handleFileSelection(file);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -83,44 +90,49 @@ export const GuestbookSection: React.FC = () => {
 
     try {
       let finalPhotoUrl = '';
-      if (photoPreview) {
-        // Upload photo to server endpoint
-        const uploadRes = await fetch('/api/guestbook/upload', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ imageBase64: photoPreview }),
-        });
-        if (uploadRes.ok) {
-          const uploadData = await uploadRes.json();
-          finalPhotoUrl = uploadData.url;
-        } else {
-          finalPhotoUrl = photoPreview; // Fallback
+
+      // 1. Upload photo to Supabase Storage bucket if file exists
+      if (photoFile) {
+        const fileExt = photoFile.name.split('.').pop();
+        const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
+        
+        const { error: uploadError } = await supabase.storage
+          .from('guestbook-photos')
+          .upload(fileName, photoFile);
+
+        if (uploadError) {
+          throw uploadError;
         }
+
+        // 2. Get public URL for the uploaded image
+        const { data: publicURLData } = supabase.storage
+          .from('guestbook-photos')
+          .getPublicUrl(fileName);
+
+        finalPhotoUrl = publicURLData.publicUrl;
       }
 
-      const res = await fetch('/api/guestbook', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      // 3. Insert record into the guestbook table
+      const { error: dbError } = await supabase.from('guestbook').insert([
+        {
           name: name.trim(),
           message: message.trim(),
-          photoUrl: finalPhotoUrl,
-        }),
-      });
+          photo_url: finalPhotoUrl,
+          status: 'pending',
+        },
+      ]);
 
-      if (res.ok) {
-        setSubmittedNotice(true);
-        setName('');
-        setMessage('');
-        setPhotoPreview('');
-        fetchApprovedEntries();
-      } else {
-        const errorData = await res.json();
-        setErrorMessage(errorData.error || 'Failed to submit message.');
-      }
-    } catch (err) {
+      if (dbError) throw dbError;
+
+      setSubmittedNotice(true);
+      setName('');
+      setMessage('');
+      setPhotoFile(null);
+      setPhotoPreview('');
+      fetchApprovedEntries();
+    } catch (err: any) {
       console.error('Submission error:', err);
-      setErrorMessage('Network error, please try again.');
+      setErrorMessage(err.message || 'Failed to submit message. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -225,7 +237,10 @@ export const GuestbookSection: React.FC = () => {
                       />
                       <button
                         type="button"
-                        onClick={() => setPhotoPreview('')}
+                        onClick={() => {
+                          setPhotoPreview('');
+                          setPhotoFile(null);
+                        }}
                         className="absolute top-2 right-2 p-1.5 bg-black/80 rounded-full text-white hover:bg-black transition-colors"
                         aria-label="Remove image"
                       >
