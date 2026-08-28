@@ -13,7 +13,7 @@ export const FinalSection: React.FC = () => {
       {/* Background: 9.jpg cinematic finish */}
       <div className="absolute inset-0 z-0 overflow-hidden">
         <img
-          src="/media/9.jpg"
+          src="media/9.jpg"
           alt="Zainab and Hasan Grand Finale"
           className="w-full h-full object-cover grayscale contrast-120 brightness-70 animate-cinematic-zoom"
           loading="lazy"

@@ -14,7 +14,7 @@ export const HeroSection: React.FC = () => {
       <div className="absolute inset-0 z-0 overflow-hidden">
         <img
           id="zh-hero-background-image"
-          src="/media/9.jpg"
+          src="media/9.jpg"
           alt="Zainab and Hasan Editorial Portrait"
           className="w-full h-full object-cover grayscale contrast-110 brightness-85 animate-cinematic-zoom transform-gpu will-change-transform"
           loading="eager"

@@ -8,7 +8,7 @@ import { PolaroidPhoto } from '../types';
 const galleryPhotos: PolaroidPhoto[] = [
   {
     id: '1',
-    src: '/media/1.jpg',
+    src: 'media/1.jpg',
     titleEn: 'THE PROMISE',
     titleAr: 'الوعد الأبدي',
     captionEn: 'Vol. 01 — Dubai',
@@ -18,7 +18,7 @@ const galleryPhotos: PolaroidPhoto[] = [
   },
   {
     id: '2',
-    src: '/media/2.jpg',
+    src: 'media/2.jpg',
     titleEn: 'EMBRACE',
     titleAr: 'لحظة هدوء',
     captionEn: 'Vol. 02 — A Quiet Moment',
@@ -28,7 +28,7 @@ const galleryPhotos: PolaroidPhoto[] = [
   },
   {
     id: '3',
-    src: '/media/3.jpg',
+    src: 'media/3.jpg',
     titleEn: 'DEVOTION',
     titleAr: 'وفاء',
     captionEn: 'Vol. 03 — Hand in Hand',
@@ -38,7 +38,7 @@ const galleryPhotos: PolaroidPhoto[] = [
   },
   {
     id: '4',
-    src: '/media/4.jpg',
+    src: 'media/4.jpg',
     titleEn: 'ELEGANCE',
     titleAr: 'أناقة وسحر',
     captionEn: 'Vol. 04 — Couture Nocturne',
@@ -48,7 +48,7 @@ const galleryPhotos: PolaroidPhoto[] = [
   },
   {
     id: '5',
-    src: '/media/5.jpg',
+    src: 'media/5.jpg',
     titleEn: 'WHISPER',
     titleAr: 'همس الضياء',
     captionEn: 'Vol. 05 — Shadow & Light',
@@ -58,7 +58,7 @@ const galleryPhotos: PolaroidPhoto[] = [
   },
   {
     id: '6',
-    src: '/media/6.jpg',
+    src: 'media/6.jpg',
     titleEn: 'SERENITY',
     titleAr: 'سكينة',
     captionEn: 'Vol. 06 — Walking Forward',
@@ -68,7 +68,7 @@ const galleryPhotos: PolaroidPhoto[] = [
   },
   {
     id: '7',
-    src: '/media/7.jpg',
+    src: 'media/7.jpg',
     titleEn: 'PORTRAIT',
     titleAr: 'بورتريه كلاسيكي',
     captionEn: 'Vol. 07 — The Union',
@@ -78,7 +78,7 @@ const galleryPhotos: PolaroidPhoto[] = [
   },
   {
     id: '8',
-    src: '/media/8.jpg',
+    src: 'media/8.jpg',
     titleEn: 'JOURNEY',
     titleAr: 'رحلة العمر',
     captionEn: 'Vol. 08 — Forever Begins',
@@ -88,7 +88,7 @@ const galleryPhotos: PolaroidPhoto[] = [
   },
   {
     id: '10',
-    src: '/media/10.jpg',
+    src: 'media/10.jpg',
     titleEn: 'CELEBRATION',
     titleAr: 'ليلة العمر',
     captionEn: 'Vol. 10 — Our Wedding Night',
