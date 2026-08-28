@@ -13,6 +13,7 @@ import {
   RefreshCw,
   LogOut,
 } from 'lucide-react';
+import { supabase } from '../supabaseClient';
 import { RSVPRecord, GuestbookRecord, AdminStats } from '../types';
 
 interface AdminPortalProps {
@@ -45,11 +46,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBack }) => {
     setLoading(true);
     setError('');
 
-    // Local PIN validation for ZH2027
     if (pin.trim() === 'ZH2027') {
       setIsAuthenticated(true);
       sessionStorage.setItem('zh_admin_auth', 'true');
-      loadAllData();
+      fetchSupabaseData();
     } else {
       setError('Invalid security code. Please check your PIN.');
     }
@@ -62,42 +62,77 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBack }) => {
     setPin('');
   };
 
-  const loadAllData = () => {
+  const fetchSupabaseData = async () => {
     setLoading(true);
     try {
-      // Load saved RSVPs and Guestbook notes from browser localStorage
-      const savedRsvps: RSVPRecord[] = JSON.parse(localStorage.getItem('zh_rsvps') || '[]');
-      const savedNotes: GuestbookRecord[] = JSON.parse(localStorage.getItem('zh_guestbook') || '[]');
+      // 1. Fetch RSVPs from Supabase
+      const { data: rsvpData, error: rsvpError } = await supabase
+        .from('rsvps')
+        .select('*')
+        .order('created_at', { ascending: false });
 
-      setRsvps(savedRsvps);
-      setGuestbookNotes(savedNotes);
+      if (rsvpError) throw rsvpError;
 
-      // Calculate stats locally
-      const confirmedCount = savedRsvps.filter((r) => r.attending === 'yes').length;
-      const totalConfirmedGuests = savedRsvps
+      // Map Supabase rows to your frontend type if column names differ
+      const formattedRsvps: RSVPRecord[] = (rsvpData || []).map((row: any) => ({
+        id: row.id.toString(),
+        name: row.name,
+        attending: row.attendance === 'yes' || row.attending === 'yes' ? 'yes' : 'no',
+        guestCount: row.guests_count || row.guestCount || 1,
+        contact: row.dietary || row.contact || '',
+        notes: row.notes || '',
+        createdAt: row.created_at || new Date().toISOString(),
+      }));
+
+      setRsvps(formattedRsvps);
+
+      // 2. Fetch Guestbook notes from Supabase
+      const { data: gbData, error: gbError } = await supabase
+        .from('guestbook')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (gbError && gbError.code !== '42P01') {
+        console.warn('Guestbook table might not exist yet:', gbError.message);
+      }
+
+      const formattedNotes: GuestbookRecord[] = (gbData || []).map((row: any) => ({
+        id: row.id.toString(),
+        name: row.name,
+        message: row.message,
+        photoUrl: row.photo_url || row.photoUrl || '',
+        status: row.status || 'pending',
+        createdAt: row.created_at || new Date().toISOString(),
+      }));
+
+      setGuestbookNotes(formattedNotes);
+
+      // 3. Compute Stats
+      const confirmedCount = formattedRsvps.filter((r) => r.attending === 'yes').length;
+      const totalConfirmedGuests = formattedRsvps
         .filter((r) => r.attending === 'yes')
         .reduce((sum, r) => sum + (Number(r.guestCount) || 1), 0);
-      const declinedCount = savedRsvps.filter((r) => r.attending === 'no').length;
+      const declinedCount = formattedRsvps.filter((r) => r.attending === 'no').length;
 
-      const pendingCount = savedNotes.filter((n) => n.status === 'pending').length;
-      const approvedCount = savedNotes.filter((n) => n.status === 'approved').length;
+      const pendingCount = formattedNotes.filter((n) => n.status === 'pending').length;
+      const approvedCount = formattedNotes.filter((n) => n.status === 'approved').length;
 
       setStats({
         rsvp: {
           confirmedCount,
           totalConfirmedGuests,
           declinedCount,
-          totalCount: savedRsvps.length,
+          totalCount: formattedRsvps.length,
         },
         guestbook: {
           pendingCount,
           approvedCount,
-          hiddenCount: savedNotes.filter((n) => n.status === 'hidden').length,
-          totalCount: savedNotes.length,
+          hiddenCount: formattedNotes.filter((n) => n.status === 'hidden').length,
+          totalCount: formattedNotes.length,
         },
       });
     } catch (err) {
-      console.error('Error loading local admin data:', err);
+      console.error('Error fetching Supabase data:', err);
     } finally {
       setLoading(false);
     }
@@ -105,155 +140,79 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBack }) => {
 
   useEffect(() => {
     if (isAuthenticated) {
-      loadAllData();
+      fetchSupabaseData();
     }
   }, [isAuthenticated]);
 
-  const handleGuestbookAction = (id: string, newStatus: 'approved' | 'hidden') => {
+  const handleGuestbookAction = async (id: string, newStatus: 'approved' | 'hidden') => {
     try {
-      const updatedNotes = guestbookNotes.map((note) =>
-        note.id === id ? { ...note, status: newStatus } : note
-      );
-      localStorage.setItem('zh_guestbook', JSON.stringify(updatedNotes));
-      loadAllData();
+      const { error } = await supabase
+        .from('guestbook')
+        .update({ status: newStatus })
+        .eq('id', id);
+
+      if (error) throw error;
+      fetchSupabaseData();
     } catch (err) {
-      console.error('Action failed:', err);
+      console.error('Failed to update guestbook status:', err);
+      alert('Error updating note status. Check console.');
     }
   };
 
-  const handleDeleteGuestbook = (id: string) => {
-    if (!confirm('Are you sure you want to permanently delete this note?')) return;
+  const handleDeleteGuestbook = async (id: string) => {
+    if (!confirm('Permanently delete this guestbook note?')) return;
     try {
-      const updatedNotes = guestbookNotes.filter((note) => note.id !== id);
-      localStorage.setItem('zh_guestbook', JSON.stringify(updatedNotes));
-      loadAllData();
+      const { error } = await supabase.from('guestbook').delete().eq('id', id);
+      if (error) throw error;
+      fetchSupabaseData();
     } catch (err) {
       console.error('Delete failed:', err);
     }
   };
 
-  const handleClearAllGuestbook = () => {
-    if (guestbookNotes.length === 0) {
-      alert('No guestbook messages to clear.');
-      return;
-    }
-    if (!confirm('Are you sure you want to permanently DELETE ALL guestbook messages? This action cannot be undone.')) {
-      return;
-    }
+  const handleDeleteRsvp = async (id: string) => {
+    if (!confirm('Permanently delete this RSVP record?')) return;
     try {
-      localStorage.removeItem('zh_guestbook');
-      loadAllData();
-    } catch (err) {
-      console.error('Clear all guestbook failed:', err);
-    }
-  };
-
-  const handleDeleteRsvp = (id: string) => {
-    if (!confirm('Are you sure you want to delete this RSVP response?')) return;
-    try {
-      const updatedRsvps = rsvps.filter((r) => r.id !== id);
-      localStorage.setItem('zh_rsvps', JSON.stringify(updatedRsvps));
-      loadAllData();
+      const { error } = await supabase.from('rsvps').delete().eq('id', id);
+      if (error) throw error;
+      fetchSupabaseData();
     } catch (err) {
       console.error('Delete failed:', err);
-    }
-  };
-
-  const handleClearAllRsvps = () => {
-    if (rsvps.length === 0) {
-      alert('No RSVP records to clear.');
-      return;
-    }
-    if (!confirm('Are you sure you want to permanently DELETE ALL RSVP guest responses? This action cannot be undone.')) {
-      return;
-    }
-    try {
-      localStorage.removeItem('zh_rsvps');
-      loadAllData();
-    } catch (err) {
-      console.error('Clear all RSVPs failed:', err);
     }
   };
 
   const handleExportCsv = () => {
     if (!rsvps || rsvps.length === 0) {
-      alert('No RSVP records to export yet.');
+      alert('No RSVP records to export.');
       return;
     }
 
-    const headers = ['ID', 'Guest Name', 'Attendance Status', 'Seats / Guest Count', 'Contact Info', 'Special Notes & Dietary Wishes', 'Submission Date'];
-    
-    const escapeCsv = (str: string | number | undefined | null) => {
-      const val = (str ?? '').toString().replace(/"/g, '""');
-      return `"${val}"`;
-    };
+    const headers = ['ID', 'Guest Name', 'Attendance', 'Seats', 'Contact / Dietary', 'Notes', 'Date'];
+    const escapeCsv = (val: any) => `"${(val ?? '').toString().replace(/"/g, '""')}"`;
 
     const rows = rsvps.map((r) => [
       escapeCsv(r.id),
       escapeCsv(r.name),
       escapeCsv(r.attending === 'yes' ? 'Attending' : 'Declined'),
       escapeCsv(r.guestCount),
-      escapeCsv(r.contact || ''),
-      escapeCsv(r.notes || ''),
+      escapeCsv(r.contact),
+      escapeCsv(r.notes),
       escapeCsv(new Date(r.createdAt).toLocaleString()),
     ]);
 
-    const csvContent = [
-      headers.join(','),
-      ...rows.map((row) => row.join(',')),
-    ].join('\r\n');
-
+    const csvContent = [headers.join(','), ...rows.map((row) => row.join(','))].join('\r\n');
     const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `rsvp-guests-zainab-hasan-${new Date().toISOString().slice(0, 10)}.csv`);
-    document.body.appendChild(link);
+    link.href = url;
+    link.download = `zainab-hasan-rsvps-${new Date().toISOString().slice(0, 10)}.csv`;
     link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  };
-
-  const handleExportGuestbookCsv = () => {
-    if (!guestbookNotes || guestbookNotes.length === 0) {
-      alert('No guestbook records to export.');
-      return;
-    }
-
-    const headers = ['ID', 'Guest Name', 'Status', 'Heartfelt Message', 'Photo Attached', 'Submitted Date'];
-    
-    const escapeCsv = (str: string | number | undefined | null) => {
-      const val = (str ?? '').toString().replace(/"/g, '""');
-      return `"${val}"`;
-    };
-
-    const rows = guestbookNotes.map((g) => [
-      escapeCsv(g.id),
-      escapeCsv(g.name),
-      escapeCsv(g.status.toUpperCase()),
-      escapeCsv(g.message),
-      escapeCsv(g.photoUrl ? 'Yes' : 'No'),
-      escapeCsv(new Date(g.createdAt).toLocaleString()),
-    ]);
-
-    const csvContent = [
-      headers.join(','),
-      ...rows.map((row) => row.join(',')),
-    ].join('\r\n');
-
-    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `guestbook-notes-${new Date().toISOString().slice(0, 10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
     URL.revokeObjectURL(url);
   };
 
   const filteredRsvps = rsvps.filter((r) => {
-    const matchesSearch = r.name.toLowerCase().includes(rsvpSearch.toLowerCase()) ||
+    const matchesSearch =
+      r.name.toLowerCase().includes(rsvpSearch.toLowerCase()) ||
       (r.contact && r.contact.toLowerCase().includes(rsvpSearch.toLowerCase()));
     const matchesFilter = rsvpFilter === 'all' || r.attending === rsvpFilter;
     return matchesSearch && matchesFilter;
@@ -264,7 +223,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBack }) => {
     return g.status === gbFilter;
   });
 
-  // Gated Login Screen
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-[#080808] text-[#F4F2ED] flex flex-col items-center justify-center p-6">
@@ -323,13 +281,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBack }) => {
 
   return (
     <div className="min-h-screen bg-[#080808] text-[#F4F2ED] p-6 sm:p-10 md:p-16">
-      {/* Top Bar */}
       <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-6 pb-8 border-b border-white/15 mb-10">
         <div className="flex items-center gap-4">
           <button
             onClick={onBack}
             className="p-2 border border-white/20 hover:border-white rounded-full text-white/70 hover:text-white transition-colors"
-            title="Return to public site"
           >
             <ArrowLeft size={18} />
           </button>
@@ -345,17 +301,17 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBack }) => {
 
         <div className="flex items-center gap-3">
           <button
-            onClick={activeTab === 'guestbook' ? handleExportGuestbookCsv : handleExportCsv}
+            onClick={handleExportCsv}
             className="inline-flex items-center gap-2 px-4 py-2.5 bg-white text-black hover:bg-white/90 text-xs font-sans-luxury tracking-widest uppercase font-semibold rounded transition-colors shadow-lg"
           >
             <Download size={14} />
-            {activeTab === 'guestbook' ? 'Export Guestbook CSV' : 'Export RSVP CSV'}
+            Export CSV
           </button>
 
           <button
-            onClick={loadAllData}
+            onClick={fetchSupabaseData}
             className="p-2.5 border border-white/20 hover:border-white rounded text-white/70 hover:text-white transition-colors"
-            title="Refresh data"
+            title="Refresh"
           >
             <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
           </button>
@@ -371,7 +327,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBack }) => {
       </div>
 
       <div className="max-w-7xl mx-auto space-y-12">
-        {/* STATS OVERVIEW CARDS */}
+        {/* STATS */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6">
           <div className="bg-[#121212] border border-white/10 p-6 rounded-xl">
             <span className="text-[10px] font-sans-luxury tracking-[0.25em] text-white/50 uppercase block mb-1">
@@ -416,7 +372,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBack }) => {
           </div>
         </div>
 
-        {/* NAVIGATION TABS */}
+        {/* TABS */}
         <div className="flex items-center gap-3 border-b border-white/15 pb-4">
           <button
             onClick={() => setActiveTab('rsvps')}
@@ -443,151 +399,115 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBack }) => {
           </button>
         </div>
 
-        {/* TAB 1: RSVP GUEST LIST */}
+        {/* RSVP TABLE */}
         {activeTab === 'rsvps' && (
-        <div className="bg-[#101010] border border-white/15 rounded-xl p-6 sm:p-8">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-white/10">
-            <div>
+          <div className="bg-[#101010] border border-white/15 rounded-xl p-6 sm:p-8">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-white/10">
               <h2 className="font-serif-luxury text-xl sm:text-2xl uppercase tracking-[0.18em] font-light">
                 RSVP GUEST LIST ({filteredRsvps.length})
               </h2>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="relative">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40" />
+                  <input
+                    type="text"
+                    value={rsvpSearch}
+                    onChange={(e) => setRsvpSearch(e.target.value)}
+                    placeholder="Search guest..."
+                    className="bg-black/50 border border-white/20 text-xs text-white pl-9 pr-3 py-2 rounded focus:outline-none focus:border-white font-sans-luxury w-48 sm:w-64"
+                  />
+                </div>
+
+                <div className="flex items-center border border-white/20 rounded overflow-hidden text-xs font-sans-luxury">
+                  <button
+                    onClick={() => setRsvpFilter('all')}
+                    className={`px-3 py-2 ${rsvpFilter === 'all' ? 'bg-white text-black font-bold' : 'text-white/60 hover:text-white'}`}
+                  >
+                    All
+                  </button>
+                  <button
+                    onClick={() => setRsvpFilter('yes')}
+                    className={`px-3 py-2 ${rsvpFilter === 'yes' ? 'bg-white text-black font-bold' : 'text-white/60 hover:text-white'}`}
+                  >
+                    Attending
+                  </button>
+                  <button
+                    onClick={() => setRsvpFilter('no')}
+                    className={`px-3 py-2 ${rsvpFilter === 'no' ? 'bg-white text-black font-bold' : 'text-white/60 hover:text-white'}`}
+                  >
+                    Declined
+                  </button>
+                </div>
+              </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-3">
-              {/* Search Bar */}
-              <div className="relative">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40" />
-                <input
-                  type="text"
-                  value={rsvpSearch}
-                  onChange={(e) => setRsvpSearch(e.target.value)}
-                  placeholder="Search name or contact..."
-                  className="bg-black/50 border border-white/20 text-xs text-white pl-9 pr-3 py-2 rounded focus:outline-none focus:border-white font-sans-luxury w-48 sm:w-64"
-                />
-              </div>
-
-              {/* Status Filter */}
-              <div className="flex items-center border border-white/20 rounded overflow-hidden text-xs font-sans-luxury">
-                <button
-                  onClick={() => setRsvpFilter('all')}
-                  className={`px-3 py-2 ${rsvpFilter === 'all' ? 'bg-white text-black font-bold' : 'text-white/60 hover:text-white'}`}
-                >
-                  All
-                </button>
-                <button
-                  onClick={() => setRsvpFilter('yes')}
-                  className={`px-3 py-2 ${rsvpFilter === 'yes' ? 'bg-white text-black font-bold' : 'text-white/60 hover:text-white'}`}
-                >
-                  Attending
-                </button>
-                <button
-                  onClick={() => setRsvpFilter('no')}
-                  className={`px-3 py-2 ${rsvpFilter === 'no' ? 'bg-white text-black font-bold' : 'text-white/60 hover:text-white'}`}
-                >
-                  Declined
-                </button>
-              </div>
-
-              {/* Direct CSV Download Button */}
-              <button
-                onClick={handleExportCsv}
-                className="inline-flex items-center gap-1.5 px-3 py-2 border border-white/20 hover:border-white bg-white/5 hover:bg-white/10 text-white rounded text-xs font-sans-luxury tracking-wider transition-colors"
-                title="Download CSV for Excel"
-              >
-                <Download size={13} />
-                <span>Export List</span>
-              </button>
-
-              {/* Clear All RSVPs Button */}
-              {rsvps.length > 0 && (
-                <button
-                  onClick={handleClearAllRsvps}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 border border-red-500/40 hover:border-red-500 bg-red-950/30 hover:bg-red-950/60 text-red-300 rounded text-xs font-sans-luxury tracking-wider transition-colors"
-                  title="Clear all RSVP records"
-                >
-                  <Trash2 size={13} />
-                  <span>Clear All</span>
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Responsive RSVP Table */}
-          <div className="overflow-x-auto mt-6">
-            <table className="w-full text-left text-xs font-sans-luxury border-collapse">
-              <thead>
-                <tr className="border-b border-white/15 text-white/50 tracking-wider uppercase">
-                  <th className="py-3 px-4 font-normal">Guest Name</th>
-                  <th className="py-3 px-4 font-normal">Status</th>
-                  <th className="py-3 px-4 font-normal">Seats</th>
-                  <th className="py-3 px-4 font-normal">Contact</th>
-                  <th className="py-3 px-4 font-normal">Notes</th>
-                  <th className="py-3 px-4 font-normal">Date</th>
-                  <th className="py-3 px-4 font-normal text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/5">
-                {filteredRsvps.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="text-center py-10 text-white/40">
-                      No RSVPs found.
-                    </td>
+            <div className="overflow-x-auto mt-6">
+              <table className="w-full text-left text-xs font-sans-luxury border-collapse">
+                <thead>
+                  <tr className="border-b border-white/15 text-white/50 tracking-wider uppercase">
+                    <th className="py-3 px-4 font-normal">Guest Name</th>
+                    <th className="py-3 px-4 font-normal">Status</th>
+                    <th className="py-3 px-4 font-normal">Seats</th>
+                    <th className="py-3 px-4 font-normal">Dietary / Contact</th>
+                    <th className="py-3 px-4 font-normal">Notes</th>
+                    <th className="py-3 px-4 font-normal">Date</th>
+                    <th className="py-3 px-4 font-normal text-right">Action</th>
                   </tr>
-                ) : (
-                  filteredRsvps.map((rsvp) => (
-                    <tr key={rsvp.id} className="hover:bg-white/[0.02] transition-colors">
-                      <td className="py-4 px-4 font-medium text-white text-sm">{rsvp.name}</td>
-                      <td className="py-4 px-4">
-                        {rsvp.attending === 'yes' ? (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-950/70 border border-green-500/40 text-green-300 text-[10px] tracking-wider uppercase">
-                            <CheckCircle2 size={11} /> Attending
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-950/70 border border-red-500/40 text-red-300 text-[10px] tracking-wider uppercase">
-                            <XCircle size={11} /> Declined
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-4 px-4 text-white/80 font-bold">{rsvp.guestCount}</td>
-                      <td className="py-4 px-4 text-white/60">{rsvp.contact || '—'}</td>
-                      <td className="py-4 px-4 text-white/70 max-w-xs truncate" title={rsvp.notes}>
-                        {rsvp.notes || '—'}
-                      </td>
-                      <td className="py-4 px-4 text-white/40">
-                        {new Date(rsvp.createdAt).toLocaleDateString()}
-                      </td>
-                      <td className="py-4 px-4 text-right">
-                        <button
-                          onClick={() => handleDeleteRsvp(rsvp.id)}
-                          className="p-1.5 text-white/40 hover:text-red-400 transition-colors"
-                          title="Delete record"
-                        >
-                          <Trash2 size={14} />
-                        </button>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {filteredRsvps.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="text-center py-10 text-white/40">
+                        No RSVPs found in Supabase.
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : (
+                    filteredRsvps.map((rsvp) => (
+                      <tr key={rsvp.id} className="hover:bg-white/[0.02] transition-colors">
+                        <td className="py-4 px-4 font-medium text-white text-sm">{rsvp.name}</td>
+                        <td className="py-4 px-4">
+                          {rsvp.attending === 'yes' ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-950/70 border border-green-500/40 text-green-300 text-[10px] tracking-wider uppercase">
+                              <CheckCircle2 size={11} /> Attending
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-950/70 border border-red-500/40 text-red-300 text-[10px] tracking-wider uppercase">
+                              <XCircle size={11} /> Declined
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-4 px-4 text-white/80 font-bold">{rsvp.guestCount}</td>
+                        <td className="py-4 px-4 text-white/60">{rsvp.contact || '—'}</td>
+                        <td className="py-4 px-4 text-white/70 max-w-xs truncate">{rsvp.notes || '—'}</td>
+                        <td className="py-4 px-4 text-white/40">
+                          {new Date(rsvp.createdAt).toLocaleDateString()}
+                        </td>
+                        <td className="py-4 px-4 text-right">
+                          <button
+                            onClick={() => handleDeleteRsvp(rsvp.id)}
+                            className="p-1.5 text-white/40 hover:text-red-400 transition-colors"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
         )}
 
-        {/* TAB 2: GUESTBOOK MODERATION */}
+        {/* GUESTBOOK MODERATION */}
         {activeTab === 'guestbook' && (
-        <div className="bg-[#101010] border border-white/15 rounded-xl p-6 sm:p-8">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-white/10">
-            <div>
+          <div className="bg-[#101010] border border-white/15 rounded-xl p-6 sm:p-8">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-white/10">
               <h2 className="font-serif-luxury text-xl sm:text-2xl uppercase tracking-[0.18em] font-light">
                 GUESTBOOK MODERATION
               </h2>
-              <p className="text-xs text-white/50 mt-1 font-sans-luxury">
-                Approve heartfelt messages to publish them to the live website
-              </p>
-            </div>
 
-            <div className="flex flex-wrap items-center gap-3">
               <div className="flex items-center border border-white/20 rounded overflow-hidden text-xs font-sans-luxury">
                 <button
                   onClick={() => setGbFilter('pending')}
@@ -614,103 +534,68 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBack }) => {
                   All
                 </button>
               </div>
+            </div>
 
-              {/* Clear All Guestbook Messages Button */}
-              {guestbookNotes.length > 0 && (
-                <button
-                  onClick={handleClearAllGuestbook}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 border border-red-500/40 hover:border-red-500 bg-red-950/30 hover:bg-red-950/60 text-red-300 rounded text-xs font-sans-luxury tracking-wider transition-colors"
-                  title="Clear all guestbook notes"
-                >
-                  <Trash2 size={13} />
-                  <span>Clear All</span>
-                </button>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-6">
+              {filteredNotes.length === 0 ? (
+                <div className="col-span-full py-12 text-center text-white/40 font-sans-luxury text-xs tracking-widest border border-white/5 p-8">
+                  No guestbook notes found.
+                </div>
+              ) : (
+                filteredNotes.map((note) => (
+                  <div key={note.id} className="bg-black/60 border border-white/10 p-5 rounded-lg flex flex-col justify-between">
+                    <div>
+                      {note.photoUrl && (
+                        <div className="aspect-video rounded overflow-hidden mb-3 bg-black">
+                          <img src={note.photoUrl} alt={note.name} className="w-full h-full object-cover" />
+                        </div>
+                      )}
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="font-sans-luxury text-xs text-white font-bold uppercase tracking-wider">{note.name}</span>
+                        <span className={`text-[9px] font-sans-luxury uppercase px-2 py-0.5 rounded ${
+                          note.status === 'approved' ? 'bg-green-950 text-green-300 border border-green-500/30' :
+                          note.status === 'pending' ? 'bg-amber-950 text-amber-300 border border-amber-500/30' : 'bg-zinc-800 text-zinc-400'
+                        }`}>
+                          {note.status}
+                        </span>
+                      </div>
+                      <p className="font-serif-luxury text-sm text-white/85 italic mb-4">"{note.message}"</p>
+                    </div>
+
+                    <div className="pt-3 border-t border-white/10 flex items-center justify-between">
+                      <span className="text-[10px] font-sans-luxury text-white/40">
+                        {new Date(note.createdAt).toLocaleDateString()}
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        {note.status !== 'approved' && (
+                          <button
+                            onClick={() => handleGuestbookAction(note.id, 'approved')}
+                            className="px-2.5 py-1 bg-green-900/60 hover:bg-green-800 text-green-200 text-[10px] font-sans-luxury tracking-wider uppercase rounded transition-colors"
+                          >
+                            Approve
+                          </button>
+                        )}
+                        {note.status !== 'hidden' && (
+                          <button
+                            onClick={() => handleGuestbookAction(note.id, 'hidden')}
+                            className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[10px] font-sans-luxury tracking-wider uppercase rounded transition-colors"
+                          >
+                            Hide
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleDeleteGuestbook(note.id)}
+                          className="p-1 text-white/40 hover:text-red-400 transition-colors"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))
               )}
             </div>
           </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-6">
-            {filteredNotes.length === 0 ? (
-              <div className="col-span-full py-12 text-center text-white/40 font-sans-luxury text-xs tracking-widest border border-white/5 p-8">
-                No guestbook notes in this category.
-              </div>
-            ) : (
-              filteredNotes.map((note) => (
-                <div
-                  key={note.id}
-                  className="bg-black/60 border border-white/10 p-5 rounded-lg flex flex-col justify-between"
-                >
-                  <div>
-                    {note.photoUrl && (
-                      <div className="aspect-video rounded overflow-hidden mb-3 bg-black">
-                        <img
-                          src={note.photoUrl}
-                          alt={note.name}
-                          className="w-full h-full object-cover grayscale"
-                        />
-                      </div>
-                    )}
-
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-sans-luxury text-xs text-white font-bold uppercase tracking-wider">
-                        {note.name}
-                      </span>
-                      <span
-                        className={`text-[9px] font-sans-luxury uppercase px-2 py-0.5 rounded ${
-                          note.status === 'approved'
-                            ? 'bg-green-950 text-green-300 border border-green-500/30'
-                            : note.status === 'pending'
-                            ? 'bg-amber-950 text-amber-300 border border-amber-500/30'
-                            : 'bg-zinc-800 text-zinc-400'
-                        }`}
-                      >
-                        {note.status}
-                      </span>
-                    </div>
-
-                    <p className="font-serif-luxury text-sm text-white/85 italic mb-4">
-                      "{note.message}"
-                    </p>
-                  </div>
-
-                  <div className="pt-3 border-t border-white/10 flex items-center justify-between">
-                    <span className="text-[10px] font-sans-luxury text-white/40">
-                      {new Date(note.createdAt).toLocaleDateString()}
-                    </span>
-
-                    <div className="flex items-center gap-1.5">
-                      {note.status !== 'approved' && (
-                        <button
-                          onClick={() => handleGuestbookAction(note.id, 'approved')}
-                          className="px-2.5 py-1 bg-green-900/60 hover:bg-green-800 text-green-200 text-[10px] font-sans-luxury tracking-wider uppercase rounded transition-colors"
-                        >
-                          Approve
-                        </button>
-                      )}
-
-                      {note.status !== 'hidden' && (
-                        <button
-                          onClick={() => handleGuestbookAction(note.id, 'hidden')}
-                          className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[10px] font-sans-luxury tracking-wider uppercase rounded transition-colors"
-                        >
-                          Hide
-                        </button>
-                      )}
-
-                      <button
-                        onClick={() => handleDeleteGuestbook(note.id)}
-                        className="p-1 text-white/40 hover:text-red-400 transition-colors"
-                        title="Delete note"
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
         )}
       </div>
     </div>
