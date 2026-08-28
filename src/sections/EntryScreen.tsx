@@ -33,7 +33,7 @@ export const EntryScreen: React.FC<EntryScreenProps> = ({ onEnter, isEntered }) 
           {/* Cinematic Photograph Background */}
           <div className="absolute inset-0 overflow-hidden">
             <img
-              src="/media/5.jpg"
+              src="media/5.jpg"
               alt="Zainab and Hasan"
               className="w-full h-full object-cover object-center grayscale contrast-110 brightness-[0.45] scale-105 transition-transform duration-1000"
             />
