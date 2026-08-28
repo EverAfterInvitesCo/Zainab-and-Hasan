@@ -18,7 +18,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
-    const audio = new Audio('/media/adele.mp3');
+    const audio = new Audio('media/adele.mp3');
     audio.loop = true;
     audio.preload = 'auto';
     audioRef.current = audio;
