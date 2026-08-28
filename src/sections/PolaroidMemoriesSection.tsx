@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ChevronLeft, ChevronRight, X, Maximize2 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
@@ -102,6 +102,33 @@ export const PolaroidMemoriesSection: React.FC = () => {
   const { t, language, isRtl } = useLanguage();
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [activePhoto, setActivePhoto] = useState<PolaroidPhoto | null>(null);
+  const [isPaused, setIsPaused] = useState(false);
+
+  // Auto-scroll effect loop
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    let animationFrameId: number;
+    const scrollSpeed = 0.8; // Adjust speed here (higher = faster)
+
+    const step = () => {
+      if (!isPaused && container) {
+        container.scrollLeft += isRtl ? -scrollSpeed : scrollSpeed;
+        
+        // Loop back to start/end seamlessly if reaching bounds
+        if (isRtl && container.scrollLeft <= 0) {
+          container.scrollLeft = container.scrollWidth / 2;
+        } else if (!isRtl && container.scrollLeft >= container.scrollWidth - container.clientWidth - 5) {
+          container.scrollLeft = 0;
+        }
+      }
+      animationFrameId = requestAnimationFrame(step);
+    };
+
+    animationFrameId = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(animationFrameId);
+  }, [isPaused, isRtl]);
 
   const scrollLeft = () => {
     if (scrollContainerRef.current) {
@@ -158,9 +185,13 @@ export const PolaroidMemoriesSection: React.FC = () => {
         </div>
       </div>
 
-      {/* HORIZONTAL SCROLL RUNWAY - MANDATORY HORIZONTAL ON ALL DEVICES */}
+      {/* HORIZONTAL SCROLL RUNWAY - AUTOMATIC & MANUAL SCROLL */}
       <div
         ref={scrollContainerRef}
+        onMouseEnter={() => setIsPaused(true)}
+        onMouseLeave={() => setIsPaused(false)}
+        onTouchStart={() => setIsPaused(true)}
+        onTouchEnd={() => setIsPaused(false)}
         className="w-full overflow-x-auto no-scrollbar py-8 px-6 md:px-12 cursor-grab active:cursor-grabbing scroll-smooth"
         style={{ WebkitOverflowScrolling: 'touch' }}
       >
