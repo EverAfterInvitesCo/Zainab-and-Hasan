@@ -1,0 +1,90 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-serif: 'Cormorant Garamond', 'Playfair Display', Georgia, serif;
+    --font-display: 'Bodoni Moda', 'Cormorant Garamond', Georgia, serif;
+    --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+    --font-arabic-calligraphy: 'Aref Ruqaa', 'Aref Ruqaa Ink', 'Amiri', 'Traditional Arabic', serif;
+    --font-arabic-serif: 'Amiri', 'Aref Ruqaa', 'Reem Kufi', serif;
+    --font-arabic-sans: 'IBM Plex Sans Arabic', 'Noto Sans Arabic', sans-serif;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    background-color: #080808;
+    color: #F4F2ED;
+  }
+}
+
+.font-serif-luxury {
+  font-family: var(--font-serif);
+}
+
+.font-display-luxury {
+  font-family: var(--font-display);
+}
+
+.font-sans-luxury {
+  font-family: var(--font-sans);
+}
+
+.font-arabic-calligraphy {
+  font-family: var(--font-arabic-calligraphy);
+}
+
+.font-arabic {
+  font-family: var(--font-arabic-serif);
+}
+
+.font-arabic-sans {
+  font-family: var(--font-arabic-sans);
+}
+
+/* Hide scrollbar while preserving scrolling function */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Subtle luxury film grain effect overlay */
+.film-grain {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.04'/%3E%3C/svg%3E");
+}
+
+/* Subtle slow zoom animation for cinematic hero */
+@keyframes cinematicZoom {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.04);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.animate-cinematic-zoom {
+  animation: cinematicZoom 28s ease-in-out infinite alternate;
+}
+
+/* Soft pulse for playing audio */
+@keyframes audioPulse {
+  0%, 100% { height: 4px; }
+  50% { height: 16px; }
+}
+
+.animate-audio-bar-1 {
+  animation: audioPulse 1.2s ease-in-out infinite 0.1s;
+}
+.animate-audio-bar-2 {
+  animation: audioPulse 1.2s ease-in-out infinite 0.3s;
+}
+.animate-audio-bar-3 {
+  animation: audioPulse 1.2s ease-in-out infinite 0.5s;
+}
+

@@ -1,0 +1,6 @@
+{
+  "name": "Zainab & Hasan Wedding Invitation",
+  "description": "Luxury bilingual digital wedding invitation website and organizer portal for Zainab & Hasan in Dubai.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
