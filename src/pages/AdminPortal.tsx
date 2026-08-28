@@ -45,25 +45,15 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBack }) => {
     setLoading(true);
     setError('');
 
-    try {
-      const res = await fetch('/api/admin/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin }),
-      });
-
-      if (res.ok) {
-        setIsAuthenticated(true);
-        sessionStorage.setItem('zh_admin_auth', 'true');
-        loadAllData();
-      } else {
-        setError('Invalid security code. Please check your PIN.');
-      }
-    } catch (err) {
-      setError('Connection error. Please try again.');
-    } finally {
-      setLoading(false);
+    // Local PIN validation for ZH2027
+    if (pin.trim() === 'ZH2027') {
+      setIsAuthenticated(true);
+      sessionStorage.setItem('zh_admin_auth', 'true');
+      loadAllData();
+    } else {
+      setError('Invalid security code. Please check your PIN.');
     }
+    setLoading(false);
   };
 
   const handleLogout = () => {
@@ -72,20 +62,42 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBack }) => {
     setPin('');
   };
 
-  const loadAllData = async () => {
+  const loadAllData = () => {
     setLoading(true);
     try {
-      const [statsRes, rsvpsRes, gbRes] = await Promise.all([
-        fetch('/api/admin/stats'),
-        fetch('/api/rsvp'),
-        fetch('/api/guestbook?all=true'),
-      ]);
+      // Load saved RSVPs and Guestbook notes from browser localStorage
+      const savedRsvps: RSVPRecord[] = JSON.parse(localStorage.getItem('zh_rsvps') || '[]');
+      const savedNotes: GuestbookRecord[] = JSON.parse(localStorage.getItem('zh_guestbook') || '[]');
 
-      if (statsRes.ok) setStats(await statsRes.json());
-      if (rsvpsRes.ok) setRsvps(await rsvpsRes.json());
-      if (gbRes.ok) setGuestbookNotes(await gbRes.json());
+      setRsvps(savedRsvps);
+      setGuestbookNotes(savedNotes);
+
+      // Calculate stats locally
+      const confirmedCount = savedRsvps.filter((r) => r.attending === 'yes').length;
+      const totalConfirmedGuests = savedRsvps
+        .filter((r) => r.attending === 'yes')
+        .reduce((sum, r) => sum + (Number(r.guestCount) || 1), 0);
+      const declinedCount = savedRsvps.filter((r) => r.attending === 'no').length;
+
+      const pendingCount = savedNotes.filter((n) => n.status === 'pending').length;
+      const approvedCount = savedNotes.filter((n) => n.status === 'approved').length;
+
+      setStats({
+        rsvp: {
+          confirmedCount,
+          totalConfirmedGuests,
+          declinedCount,
+          totalCount: savedRsvps.length,
+        },
+        guestbook: {
+          pendingCount,
+          approvedCount,
+          hiddenCount: savedNotes.filter((n) => n.status === 'hidden').length,
+          totalCount: savedNotes.length,
+        },
+      });
     } catch (err) {
-      console.error('Error loading admin data:', err);
+      console.error('Error loading local admin data:', err);
     } finally {
       setLoading(false);
     }
@@ -97,34 +109,30 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBack }) => {
     }
   }, [isAuthenticated]);
 
-  const handleGuestbookAction = async (id: string, newStatus: 'approved' | 'hidden') => {
+  const handleGuestbookAction = (id: string, newStatus: 'approved' | 'hidden') => {
     try {
-      const res = await fetch(`/api/guestbook/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus }),
-      });
-      if (res.ok) {
-        loadAllData();
-      }
+      const updatedNotes = guestbookNotes.map((note) =>
+        note.id === id ? { ...note, status: newStatus } : note
+      );
+      localStorage.setItem('zh_guestbook', JSON.stringify(updatedNotes));
+      loadAllData();
     } catch (err) {
       console.error('Action failed:', err);
     }
   };
 
-  const handleDeleteGuestbook = async (id: string) => {
+  const handleDeleteGuestbook = (id: string) => {
     if (!confirm('Are you sure you want to permanently delete this note?')) return;
     try {
-      const res = await fetch(`/api/guestbook/${id}`, { method: 'DELETE' });
-      if (res.ok) {
-        loadAllData();
-      }
+      const updatedNotes = guestbookNotes.filter((note) => note.id !== id);
+      localStorage.setItem('zh_guestbook', JSON.stringify(updatedNotes));
+      loadAllData();
     } catch (err) {
       console.error('Delete failed:', err);
     }
   };
 
-  const handleClearAllGuestbook = async () => {
+  const handleClearAllGuestbook = () => {
     if (guestbookNotes.length === 0) {
       alert('No guestbook messages to clear.');
       return;
@@ -133,28 +141,25 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBack }) => {
       return;
     }
     try {
-      const res = await fetch('/api/guestbook/all', { method: 'DELETE' });
-      if (res.ok) {
-        loadAllData();
-      }
+      localStorage.removeItem('zh_guestbook');
+      loadAllData();
     } catch (err) {
       console.error('Clear all guestbook failed:', err);
     }
   };
 
-  const handleDeleteRsvp = async (id: string) => {
+  const handleDeleteRsvp = (id: string) => {
     if (!confirm('Are you sure you want to delete this RSVP response?')) return;
     try {
-      const res = await fetch(`/api/rsvp/${id}`, { method: 'DELETE' });
-      if (res.ok) {
-        loadAllData();
-      }
+      const updatedRsvps = rsvps.filter((r) => r.id !== id);
+      localStorage.setItem('zh_rsvps', JSON.stringify(updatedRsvps));
+      loadAllData();
     } catch (err) {
       console.error('Delete failed:', err);
     }
   };
 
-  const handleClearAllRsvps = async () => {
+  const handleClearAllRsvps = () => {
     if (rsvps.length === 0) {
       alert('No RSVP records to clear.');
       return;
@@ -163,10 +168,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBack }) => {
       return;
     }
     try {
-      const res = await fetch('/api/rsvp/all', { method: 'DELETE' });
-      if (res.ok) {
-        loadAllData();
-      }
+      localStorage.removeItem('zh_rsvps');
+      loadAllData();
     } catch (err) {
       console.error('Clear all RSVPs failed:', err);
     }
@@ -200,7 +203,6 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onBack }) => {
       ...rows.map((row) => row.join(',')),
     ].join('\r\n');
 
-    // \uFEFF ensures Microsoft Excel detects UTF-8 correctly for Arabic and English names
     const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
